@@ -10,6 +10,7 @@ st.set_page_config(page_title="강원도 고령화 & 경제 분석 대시보드"
 st.title("🌲 강원도 지역 경제 및 고령화 현황 분석")
 st.markdown("본 대시보드는 강원도의 인구 구조 변화와 주요 경제 지표를 시각화하여 가설을 검증합니다.")
 
+# 2. 데이터베이스 연결
 db_file = "강원도분석.db"
 
 if not os.path.exists(db_file):
@@ -32,40 +33,27 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # 전체 테이블을 가져온 뒤 데이터가 매칭되는 고유 텍스트 기반 추출
-        df_aging_raw = run_query("SELECT * FROM [고령화]")
-        
-        # 4자리 연도 숫자가 들어있는 행만 깔끔하게 필터링
-        df_aging_clean = df_aging_raw[df_aging_raw.iloc[:, 0].astype(str).str.contains(r'^\d{4}$', na=False)].copy()
-        
-        # 65세 이상 고령자 컬럼이 위치한 곳을 유연하게 검색하여 절대 매핑
-        col_list = df_aging_clean.columns.tolist()
-        
-        # 2014~2023 시점(0번), 등록인구 소계(2번), 65세 고령자(13번 근처 탐색)
-        years = df_aging_clean.iloc[:, 0].tolist()
-        
-        # 쉼표 제거 후 완전한 숫자형 변환
-        total_pop = pd.to_numeric(df_aging_clean.iloc[:, 2].astype(str).str.replace(',', ''), errors='coerce').tolist()
-        
-        # 원본 데이터 기준 65세 이상 고령자는 14번째 열(인덱스 13)에 정확히 위치함
-        elder_pop = pd.to_numeric(df_aging_clean.iloc[:, 13].astype(str).str.replace(',', ''), errors='coerce').tolist()
-        
-        df_aging = pd.DataFrame({
-            '연도': years,
-            '등록인구': total_pop,
-            '고령자': elder_pop
-        })
-        df_aging['고령화율'] = (df_aging['고령자'] / df_aging['등록인구']) * 100
-        df_aging = df_aging.dropna().sort_values('연도')
+        # DB 스키마와 완벽히 일치하는 컬럼명으로 쿼리 실행
+        query_aging = """
+        SELECT 
+            시점 AS 연도, 
+            등록인구_소계 AS 등록인구, 
+            고령자_65세이상 AS 고령자,
+            (CAST(고령자_65세이상 AS FLOAT) / 등록인구_소계) * 100 AS 고령화율
+        FROM 고령화
+        WHERE 시점 IS NOT NULL
+        ORDER BY 시점
+        """
+        df_aging = run_query(query_aging)
 
-        # 시각화 렌더링
+        # 이중 축 콤보 차트 생성
         fig1_1 = go.Figure()
         fig1_1.add_trace(go.Bar(
             x=df_aging['연도'], y=df_aging['고령자'], 
             name='고령자 수 (명)', yaxis='y1', marker_color='#FFA07A'
         ))
         fig1_1.add_trace(go.Scatter(
-            x=df_aging['연도'], y=df_aging['고령화율'], 
+            x=df_aging['연度' if '연度' in df_aging else '연도'], y=df_aging['고령화율'], 
             name='고령화율 (%)', yaxis='y2', mode='lines+markers', line=dict(color='#FF4500', width=3)
         ))
         
@@ -84,34 +72,30 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        df_ep_raw = run_query("SELECT * FROM [경제인구]")
+        # 경제인구 테이블의 실제 컬럼명 매핑 확인 완료
+        query_ep = """
+        SELECT 
+            취업자, 
+            실업자, 
+            비경제활동_가사육아, 
+            비경제활동_통학, 
+            비경제활동_기타
+        FROM 경제인구
+        WHERE 성별 = '합계' AND 분기별 = '전체'
+        LIMIT 1
+        """
+        df_ep = run_query(query_ep)
         
-        # '합계'와 '전체'가 동시에 적힌 핵심 행 저격 필터링
-        df_filtered = df_ep_raw[
-            df_ep_raw.iloc[:, 0].astype(str).str.contains('합계', na=False) & 
-            df_ep_raw.iloc[:, 1].astype(str).str.contains('전체', na=False)
-        ]
-        
-        if not df_filtered.empty:
+        if not df_ep.empty:
             labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
-            
-            # 원본 데이터 슬라이스 분석 결과 콤마를 제거한 고정 순서 인덱싱 배정
-            row_data = df_filtered.iloc[0]
-            values = [
-                pd.to_numeric(str(row_data.iloc[4]).replace(',', ''), errors='coerce'),  # 취업자 (841)
-                pd.to_numeric(str(row_data.iloc[5]).replace(',', ''), errors='coerce'),  # 실업자 (24)
-                pd.to_numeric(str(row_data.iloc[7]).replace(',', ''), errors='coerce'),  # 가사/육아 (160)
-                pd.to_numeric(str(row_data.iloc[8]).replace(',', ''), errors='coerce'),  # 통학 (85)
-                pd.to_numeric(str(row_data.iloc[9]).replace(',', ''), errors='coerce')   # 기타 (217)
-            ]
+            row = df_ep.iloc[0]
+            values = [row['취업자'], row['실업자'], row['비경제활동_가사육아'], row['비경제활동_통학'], row['비경제활동_기타']]
             
             fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
-            # 예외 방어용 하드코딩 백업 규칙 적용
-            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
-            st.plotly_chart(go.Figure(data=[go.Pie(labels=labels, values=[841, 24, 160, 85, 217], hole=.4)]), use_container_width=True)
+            st.warning("경제인구 데이터에서 '합계' 및 '전체'에 해당하는 행을 찾을 수 없습니다.")
             
     except Exception as e:
         st.error(f"차트 1-2 로드 실패: {e}")
@@ -130,34 +114,29 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    df_grdp_raw = run_query("SELECT * FROM [GRDP]")
+    # GRDP 테이블의 실제 컬럼명 반영
+    query_grdp = """
+    SELECT 
+        시도별, 
+        경제활동별, 
+        실질
+    FROM GRDP
+    WHERE 시도별 LIKE '%강원%'
+      AND 경제활동별 NOT IN ('지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치')
+    ORDER BY 실질 ASC
+    """
+    df_grdp = run_query(query_grdp)
     
-    # [인덱스 에러 완벽 해결] 컬럼 이름과 무관하게 첫 번째(0), 두 번째(1), 네 번째(3) 열을 안전하게 분리
-    df_grdp = pd.DataFrame()
-    df_grdp['시도별'] = df_grdp_raw.iloc[:, 0].astype(str)
-    df_grdp['경제활동별'] = df_grdp_raw.iloc[:, 1].astype(str)
-    df_grdp['실질GRDP'] = df_grdp_raw.iloc[:, 3]
-    
-    # 강원도가 포함된 행만 필터링 진행
-    df_grdp = df_grdp[df_grdp['시도별'].str.contains('강원', na=False)]
-    
-    # 통계용 대분류 필터링 및 텍스트 예외 제외
-    exclude_list = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '경제활동별', '총부가가치']
-    df_grdp = df_grdp[~df_grdp['경제활동별'].isin(exclude_list)]
-    
-    df_grdp['실질GRDP'] = pd.to_numeric(df_grdp['실질GRDP'].astype(str).str.replace(',', ''), errors='coerce')
-    df_grdp = df_grdp.dropna().sort_values('실질GRDP', ascending=True)
-    
-    # 하이라이트 색상 매핑 규칙 정의
+    # 하이라이트 색상 매핑
     colors = []
     for cat in df_grdp['경제활동별']:
         if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
-            colors.append('#008080') # 관광서비스 분야 하이라이트 청록색
+            colors.append('#008080') # 관광/서비스 하이라이트 청록색
         else:
-            colors.append('#D3D3D3') # 일반 베이스 영역 회색
+            colors.append('#D3D3D3') # 나머지 일반 산업 회색
             
     fig2 = go.Figure(go.Bar(
-        x=df_grdp['실질GRDP'],
+        x=df_grdp['실질'],
         y=df_grdp['경제활동별'],
         orientation='h',
         marker_color=colors
