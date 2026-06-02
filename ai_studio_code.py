@@ -77,44 +77,37 @@ with col1:
         st.error(f"차트 1-1 로드 실패: {e}")
 
 with col2:
-    st.subheader("1-2. 강원도 인구 구성 현황")
+    st.subheader("1-2. 강원도 인구 구성 현황 (2023)")
     
     try:
-        # [수정 핵심] 쿼리단 필터링을 풀고 파이썬에서 유연하게 매칭 처리
+        # [수정 완료] 조건 검색 방식을 철회하고 테이블 최상단의 '합계/전체' 행을 안전하게 로드
         query_ep = "SELECT * FROM 경제인구"
         df_ep = run_query(query_ep)
         
         if not df_ep.empty:
-            # 컬럼명 및 데이터 텍스트 정제
             df_ep.columns = df_ep.columns.str.strip()
-            df_ep['성별'] = df_ep['성별'].astype(str).str.strip()
-            df_ep['분기별'] = df_ep['분기별'].astype(str).str.strip()
             
-            # 성별 조건 유연화 ('합계' 또는 '계' 포함 여부 탐색)
-            gender_mask = df_ep['성별'].str.contains('합계|계')
+            # 조건부 필터링 (가장 확실한 첫 번째 조건 매칭)
+            df_target = df_ep[(df_ep['성별'].str.contains('합계|계')) & (df_ep['분기별'].str.contains('전체|계|연평균'))]
             
-            # 분기별 조건 유연화 ('전체' 또는 '계' 또는 '연평균' 포함 여부 탐색)
-            period_mask = df_ep['분기별'].str.contains('전체|계|연평균')
+            # 만약 필터링 결과가 비어있다면 그냥 첫 행 데이터 사용 (안전장치)
+            if df_target.empty:
+                row = df_ep.iloc[0]
+            else:
+                row = df_target.iloc[0]
             
-            df_filtered = df_ep[gender_mask & period_mask]
-            
-            # 만약 위 조건으로 매칭되는 게 없으면 그냥 첫 번째 행을 사용하도록 예외 방어
-            if df_filtered.empty:
-                df_filtered = df_ep.copy()
-                
-            row = df_filtered.iloc[0]
-            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
-            
-            # 컬럼명 유연성 확보 (언더바 오타 방지)
+            # 가사육아 컬럼명 동적 탐색 (오타 및 언더바 방어)
             household_col = [c for c in df_ep.columns if '가사' in c][0]
             
-            values = [
-                pd.to_numeric(row['취업자'], errors='coerce'), 
-                pd.to_numeric(row['실업자'], errors='coerce'), 
-                pd.to_numeric(row[household_col], errors='coerce'), 
-                pd.to_numeric(row['비경제활동_통학'], errors='coerce'), 
-                pd.to_numeric(row['비경제활동_기타'], errors='coerce')
-            ]
+            # 원본 데이터가 문자열일 수 있으므로 깨끗하게 숫자 데이터로 강제 변환
+            v_employ = int(pd.to_numeric(row['취업자'], errors='coerce'))
+            v_unemploy = int(pd.to_numeric(row['실업자'], errors='coerce'))
+            v_house = int(pd.to_numeric(row[household_col], errors='coerce'))
+            v_school = int(pd.to_numeric(row['비경제활동_통학'], errors='coerce'))
+            v_etc = int(pd.to_numeric(row['비경제활동_기타'], errors='coerce'))
+            
+            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
+            values = [v_employ, v_unemploy, v_house, v_school, v_etc]
             
             fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
@@ -147,10 +140,10 @@ try:
         df_grdp['시도별'] = df_grdp['시도별'].astype(str).str.strip()
         df_grdp['경제활동별'] = df_grdp['경제활동별'].astype(str).str.strip()
         
-        # 강원도 데이터 필터링
+        # 강원 데이터 추출
         df_grdp = df_grdp[df_grdp['시도별'].str.contains('강원')].copy()
         
-        # 지능형 값 열 추적 (KeyError 원천 박멸 구조)
+        # 지능형 수치 컬럼 탐색 구조
         value_col = None
         for col in df_grdp.columns:
             if col in ['실질', '당해년도_가격', '당해년도가격', '값', '금액']:
@@ -166,7 +159,7 @@ try:
             else:
                 df_grdp['금액'] = pd.to_numeric(df_grdp.iloc[:, -1], errors='coerce').fillna(0)
         
-        # 불필요 항목 필터링
+        # 상위 합계 카테고리 필터링
         exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체', '총합', '계']
         df_grdp_filtered = df_grdp[~df_grdp['경제활동별'].isin(exclude_cats)].sort_values('금액', ascending=True)
         
