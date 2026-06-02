@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import os
 
-# 1. 페이지 설정
+# 1. 페이지 설정 및 제목
 st.set_page_config(page_title="강원도 고령화 & 경제 분석 대시보드", layout="wide")
 st.title("🌲 강원도 지역 경제 및 고령화 현황 분석")
 st.markdown("본 대시보드는 강원도의 인구 구조 변화와 주요 경제 지표를 시각화하여 가설을 검증합니다.")
@@ -33,12 +33,12 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # DB 컬럼명과 100% 일치하는 쿼리 및 정확한 계산식 반영
+        # DB 컬럼 구조 그대로 가져오기
         query_aging = """
         SELECT 
-            시점 AS 연도, 
-            등록인구_소계 AS 등록인구, 
-            고령자_65세이상 AS 고령자,
+            시점, 
+            등록인구_소계, 
+            고령자_65세이상,
             (CAST(고령자_65세이상 AS FLOAT) / 등록인구_소계) * 100 AS 고령화율
         FROM 고령화
         WHERE 시점 IS NOT NULL
@@ -46,17 +46,17 @@ with col1:
         """
         df_aging = run_query(query_aging)
 
-        # 이중 축 콤보 차트 생성 (KeyError 원천 차단)
+        # 이중 축 콤보 차트 생성 (DB 컬럼명 '시점'으로 통일)
         fig1_1 = go.Figure()
         fig1_1.add_trace(go.Bar(
-            x=df_aging['연도'], 
-            y=df_aging['고령자'], 
+            x=df_aging['시점'], 
+            y=df_aging['고령자_65세이상'], 
             name='고령자 수 (명)', 
             yaxis='y1', 
             marker_color='#FFA07A'
         ))
         fig1_1.add_trace(go.Scatter(
-            x=df_aging['연도'], 
+            x=df_aging['시점'], 
             y=df_aging['고령화율'], 
             name='고령화율 (%)', 
             yaxis='y2', 
