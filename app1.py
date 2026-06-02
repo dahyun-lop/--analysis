@@ -33,7 +33,6 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # DB 컬럼 구조 그대로 가져오기
         query_aging = """
         SELECT 
             시점, 
@@ -46,7 +45,6 @@ with col1:
         """
         df_aging = run_query(query_aging)
 
-        # 이중 축 콤보 차트 생성 (DB 컬럼명 '시점'으로 통일)
         fig1_1 = go.Figure()
         fig1_1.add_trace(go.Bar(
             x=df_aging['시점'], 
@@ -64,6 +62,7 @@ with col1:
             line=dict(color='#FF4500', width=3)
         ))
         
+        # yaxis2 설정 및 레이아웃 구조 표준화
         fig1_1.update_layout(
             yaxis=dict(title='고령자 수 (명)', showgrid=False),
             yaxis2=dict(title='고령화율 (%)', overlaying='y', side='right', showgrid=True),
@@ -79,7 +78,6 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        # 경제인구 테이블 조회
         query_ep = """
         SELECT 
             취업자, 
@@ -88,7 +86,8 @@ with col2:
             비경제활동_통학, 
             비경제활동_기타
         FROM 경제인구
-        WHERE 성별 = '합계' AND 분기별 = '전체'
+        WHERE (성별 = '합계' OR 성별 LIKE '%합계%') 
+          AND (분기별 = '전체' OR 분기별 LIKE '%전체%' OR 분기별 LIKE '%연간%')
         LIMIT 1
         """
         df_ep = run_query(query_ep)
@@ -102,7 +101,7 @@ with col2:
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
-            st.warning("경제인구 데이터에서 '합계' 및 '전체'에 해당하는 행을 찾을 수 없습니다.")
+            st.warning("경제인구 데이터에서 조건을 만족하는 데이터를 찾을 수 없습니다. DB의 '성별' 및 '분기별' 컬럼 값을 확인해주세요.")
             
     except Exception as e:
         st.error(f"차트 1-2 로드 실패: {e}")
@@ -121,7 +120,6 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # GRDP 테이블 조회
     query_grdp = """
     SELECT 
         시도별, 
@@ -134,13 +132,12 @@ try:
     """
     df_grdp = run_query(query_grdp)
     
-    # 하이라이트 색상 매핑
     colors = []
     for cat in df_grdp['경제활동별']:
         if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
-            colors.append('#008080') # 관광/서비스 하이라이트 청록색
+            colors.append('#008080') 
         else:
-            colors.append('#D3D3D3') # 나머지 일반 산업 회색
+            colors.append('#D3D3D3') 
             
     fig2 = go.Figure(go.Bar(
         x=df_grdp['실질'],
@@ -149,10 +146,14 @@ try:
         marker_color=colors
     ))
     
+    # [수정] autorange="text" 제거 -> automargin=True 및 tickfont 조정으로 텍스트 잘림 방지
     fig2.update_layout(
         xaxis_title="실질 GRDP (백만 원)",
-        yaxis=dict(autorange="text", tickfont=dict(size=11)),
-        margin=dict(l=150, r=40, t=20, b=40),
+        yaxis=dict(
+            tickfont=dict(size=11),
+            automargin=True  # 텍스트가 길어지면 축 여백을 자동으로 늘려줌
+        ),
+        margin=dict(l=50, r=40, t=20, b=40),
         height=600
     )
     st.plotly_chart(fig2, use_container_width=True)
