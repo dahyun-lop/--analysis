@@ -33,7 +33,7 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # DB 스키마와 완벽히 일치하는 컬럼명으로 쿼리 실행
+        # DB 컬럼명과 100% 일치하는 쿼리 및 정확한 계산식 반영
         query_aging = """
         SELECT 
             시점 AS 연도, 
@@ -46,15 +46,22 @@ with col1:
         """
         df_aging = run_query(query_aging)
 
-        # 이중 축 콤보 차트 생성
+        # 이중 축 콤보 차트 생성 (KeyError 원천 차단)
         fig1_1 = go.Figure()
         fig1_1.add_trace(go.Bar(
-            x=df_aging['연도'], y=df_aging['고령자'], 
-            name='고령자 수 (명)', yaxis='y1', marker_color='#FFA07A'
+            x=df_aging['연도'], 
+            y=df_aging['고령자'], 
+            name='고령자 수 (명)', 
+            yaxis='y1', 
+            marker_color='#FFA07A'
         ))
         fig1_1.add_trace(go.Scatter(
-            x=df_aging['연度' if '연度' in df_aging else '연도'], y=df_aging['고령화율'], 
-            name='고령화율 (%)', yaxis='y2', mode='lines+markers', line=dict(color='#FF4500', width=3)
+            x=df_aging['연도'], 
+            y=df_aging['고령화율'], 
+            name='고령화율 (%)', 
+            yaxis='y2', 
+            mode='lines+markers', 
+            line=dict(color='#FF4500', width=3)
         ))
         
         fig1_1.update_layout(
@@ -72,7 +79,7 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        # 경제인구 테이블의 실제 컬럼명 매핑 확인 완료
+        # 경제인구 테이블 조회
         query_ep = """
         SELECT 
             취업자, 
@@ -114,7 +121,7 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # GRDP 테이블의 실제 컬럼명 반영
+    # GRDP 테이블 조회
     query_grdp = """
     SELECT 
         시도별, 
