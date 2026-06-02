@@ -10,11 +10,11 @@ st.set_page_config(page_title="강원도 고령화 & 경제 분석 대시보드"
 st.title("🌲 강원도 지역 경제 및 고령화 현황 분석")
 st.markdown("본 대시보드는 강원도의 인구 구조 변화와 주요 경제 지표를 시각화하여 가설을 검증합니다.")
 
-# 2. 데이터베이스 연결 설정
+# 2. 데이터베이스 연결
 db_file = "강원도분석.db"
 
 if not os.path.exists(db_file):
-    st.error(f"⚠️ 데이터베이스 파일({db_file})을 찾을 수 없습니다. 파일이 app.py와 같은 폴더에 있는지 확인해주세요.")
+    st.error(f"⚠️ 데이터베이스 파일({db_file})을 찾을 수 없습니다. 파일 위치를 확인해주세요.")
     st.stop()
 
 def run_query(q):
@@ -33,29 +33,29 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # [수정] 실제 DB 테이블명(aging_population)과 컬럼명(년도) 반영
+        # 실제 한글 테이블명 '고령화', 컬럼명 '시점' 반영
         query_aging = """
         SELECT 
-            년도, 
+            시점, 
             등록인구_소계, 
             고령자_65세이상,
             (CAST(고령자_65세이상 AS FLOAT) / 등록인구_소계) * 100 AS 고령화율
-        FROM aging_population
-        WHERE 년도 IS NOT NULL
-        ORDER BY 년도
+        FROM 고령화
+        WHERE 시점 IS NOT NULL
+        ORDER BY 시점
         """
         df_aging = run_query(query_aging)
 
         fig1_1 = go.Figure()
         fig1_1.add_trace(go.Bar(
-            x=df_aging['년도'], 
+            x=df_aging['시점'], 
             y=df_aging['고령자_65세이상'], 
             name='고령자 수 (명)', 
             yaxis='y1', 
             marker_color='#FFA07A'
         ))
         fig1_1.add_trace(go.Scatter(
-            x=df_aging['년도'], 
+            x=df_aging['시점'], 
             y=df_aging['고령화율'], 
             name='고령화율 (%)', 
             yaxis='y2', 
@@ -63,6 +63,7 @@ with col1:
             line=dict(color='#FF4500', width=3)
         ))
         
+        # Dual Y-axis 레이아웃 표준 구조 설정
         fig1_1.update_layout(
             yaxis=dict(title='고령자 수 (명)', showgrid=False),
             yaxis2=dict(title='고령화율 (%)', overlaying='y', side='right', showgrid=True),
@@ -78,16 +79,16 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        # [수정] 실제 DB 테이블명(economic_population)과 오타가 있던 컬럼명(_가사_육아) 수정
+        # 실제 한글 테이블명 '경제인구', 컬럼명 '비경제활동_가사육아' 반영
         query_ep = """
         SELECT 
             취업자, 
             실업자, 
-            비경제활동_가사_육아, 
+            비경제활동_가사육아, 
             비경제활동_통학, 
             비경제활동_기타
-        FROM economic_population
-        WHERE 성별 = '합계' AND 분기별 = '전체'
+        FROM 경제인구
+        WHERE 성별 LIKE '%합계%' AND 분기별 LIKE '%전체%'
         LIMIT 1
         """
         df_ep = run_query(query_ep)
@@ -95,13 +96,13 @@ with col2:
         if not df_ep.empty:
             labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
             row = df_ep.iloc[0]
-            values = [row['취업자'], row['실업자'], row['비경제활동_가사_육아'], row['비경제활동_통학'], row['비경제활동_기타']]
+            values = [row['취업자'], row['실업자'], row['비경제활동_가사육아'], row['비경제활동_통학'], row['비경제활동_기타']]
             
             fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
-            st.warning("경제인구 데이터에서 '합계' 및 '전체'에 해당하는 행을 찾을 수 없습니다.")
+            st.warning("경제인구 데이터에서 조건을 만족하는 데이터를 찾을 수 없습니다.")
             
     except Exception as e:
         st.error(f"차트 1-2 로드 실패: {e}")
@@ -120,43 +121,47 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # [수정] 실제 DB 테이블명(grdp_data) 반영
+    # 실제 테이블명 'grdp_data' 반영 및 강원 지역 데이터 한정 추출
     query_grdp = """
     SELECT 
         시도별, 
         경제활동별, 
-        실질
+        CAST(실질 AS REALSCORE) as 실질값
     FROM grdp_data
     WHERE 시도별 LIKE '%강원%'
-      AND 경제활동별 NOT IN ('지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치')
-    ORDER BY 실질 ASC
+      AND 경제활동별 NOT IN ('지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체')
+    ORDER BY 실질값 ASC
     """
     df_grdp = run_query(query_grdp)
     
-    colors = []
-    for cat in df_grdp['경제활동별']:
-        if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
-            colors.append('#008080') 
-        else:
-            colors.append('#D3D3D3') 
-            
-    fig2 = go.Figure(go.Bar(
-        x=df_grdp['실질'],
-        y=df_grdp['경제활동별'],
-        orientation='h',
-        marker_color=colors
-    ))
-    
-    fig2.update_layout(
-        xaxis_title="실질 GRDP (백만 원)",
-        yaxis=dict(
-            tickfont=dict(size=11),
-            automargin=True
-        ),
-        margin=dict(l=50, r=40, t=20, b=40),
-        height=600
-    )
-    st.plotly_chart(fig2, use_container_width=True)
+    if not df_grdp.empty:
+        colors = []
+        for cat in df_grdp['경제활동별']:
+            if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
+                colors.append('#008080') # 하이라이트 청록색
+            else:
+                colors.append('#D3D3D3') # 기본 회색
+                
+        fig2 = go.Figure(go.Bar(
+            x=df_grdp['실질값'],
+            y=df_grdp['경제활동별'],
+            orientation='h',
+            marker_color=colors
+        ))
+        
+        # Mime type 에러를 방지하기 위해 불필요한 레이아웃 속성을 표준 구조로 고정
+        fig2.update_layout(
+            xaxis_title="실질 GRDP (백만 원)",
+            yaxis=dict(
+                tickfont=dict(size=11),
+                automargin=True
+            ),
+            margin=dict(l=50, r=40, t=20, b=40),
+            height=600
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.warning("grdp_data 테이블에서 '강원' 조건을 만족하는 데이터를 찾지 못했습니다.")
         
 except Exception as e:
     st.error(f"차트 2 로드 실패: {e}")
@@ -168,12 +173,10 @@ st.info("""
 """)
 
 # --------------------------------------------------------------------------------------------------
-# 배포 가이드 안내
+# 하단 안내 영역 (Mime type 버그 방지를 위해 단순 텍스트로 수정)
 # --------------------------------------------------------------------------------------------------
 st.write("---")
-st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 안내")
-st.markdown("""
-1. **GitHub 업로드:** 새 저장소(Repository)를 만들고 `app.py`, `requirements.txt`, `강원도분석.db` 파일을 푸시(Upload)합니다. (이제 CSV 파일은 없어도 됩니다!)
-2. **Cloud 로그인:** [Streamlit Community Cloud](https://share.streamlit.io/)에 접속하여 GitHub 계정으로 로그인합니다.
-3. **App 배포:** **[New app]** 버튼을 누른 후, 방금 만든 레포지토리와 `app.py` 경로를 선택하고 **[Deploy]**를 누르면 1분 만에 전 세계에 배포됩니다.
-""")
+st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 방법")
+st.text("1. GitHub 저장소에 app.py, requirements.txt, 강원도분석.db 3개 파일을 업로드합니다.")
+st.text("2. share.streamlit.io (Streamlit Cloud)에 접속하여 로그인합니다.")
+st.text("3. [New app] 버튼을 누르고 본인의 Repository와 app.py를 선택한 뒤 Deploy를 클릭하면 완료됩니다.")
