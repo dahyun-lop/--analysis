@@ -33,44 +33,46 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # 실제 한글 테이블명 '고령화', 컬럼명 '시점' 반영
+        # [수정] 데이터 타입을 REAL로 안전하게 캐스팅
         query_aging = """
         SELECT 
             시점, 
             등록인구_소계, 
             고령자_65세이상,
-            (CAST(고령자_65세이상 AS FLOAT) / 등록인구_소계) * 100 AS 고령화율
+            (CAST(고령자_65세이상 AS REAL) / CAST(등록인구_소계 AS REAL)) * 100 AS 고령화율
         FROM 고령화
         WHERE 시점 IS NOT NULL
         ORDER BY 시점
         """
         df_aging = run_query(query_aging)
 
-        fig1_1 = go.Figure()
-        fig1_1.add_trace(go.Bar(
-            x=df_aging['시점'], 
-            y=df_aging['고령자_65세이상'], 
-            name='고령자 수 (명)', 
-            yaxis='y1', 
-            marker_color='#FFA07A'
-        ))
-        fig1_1.add_trace(go.Scatter(
-            x=df_aging['시점'], 
-            y=df_aging['고령화율'], 
-            name='고령화율 (%)', 
-            yaxis='y2', 
-            mode='lines+markers', 
-            line=dict(color='#FF4500', width=3)
-        ))
-        
-        # Dual Y-axis 레이아웃 표준 구조 설정
-        fig1_1.update_layout(
-            yaxis=dict(title='고령자 수 (명)', showgrid=False),
-            yaxis2=dict(title='고령화율 (%)', overlaying='y', side='right', showgrid=True),
-            legend=dict(x=0.01, y=0.99),
-            margin=dict(l=40, r=40, t=20, b=40)
-        )
-        st.plotly_chart(fig1_1, use_container_width=True)
+        if not df_aging.empty:
+            fig1_1 = go.Figure()
+            fig1_1.add_trace(go.Bar(
+                x=df_aging['시점'], 
+                y=df_aging['고령자_65세이상'], 
+                name='고령자 수 (명)', 
+                yaxis='y1', 
+                marker_color='#FFA07A'
+            ))
+            fig1_1.add_trace(go.Scatter(
+                x=df_aging['시점'], 
+                y=df_aging['고령화율'], 
+                name='고령화율 (%)', 
+                yaxis='y2', 
+                mode='lines+markers', 
+                line=dict(color='#FF4500', width=3)
+            ))
+            
+            fig1_1.update_layout(
+                yaxis=dict(title='고령자 수 (명)', showgrid=False),
+                yaxis2=dict(title='고령화율 (%)', overlaying='y', side='right', showgrid=True),
+                legend=dict(x=0.01, y=0.99),
+                margin=dict(l=40, r=40, t=20, b=40)
+            )
+            st.plotly_chart(fig1_1, use_container_width=True)
+        else:
+            st.warning("고령화 테이블에 데이터가 없습니다.")
             
     except Exception as e:
         st.error(f"차트 1-1 로드 실패: {e}")
@@ -79,30 +81,35 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        # 실제 한글 테이블명 '경제인구', 컬럼명 '비경제활동_가사육아' 반영
+        # LIKE 조건을 활용해 공백이나 세부 표기 차이 방어
         query_ep = """
-        SELECT 
-            취업자, 
-            실업자, 
-            비경제활동_가사육아, 
-            비경제활동_통학, 
-            비경제활동_기타
-        FROM 경제인구
+        SELECT * FROM 경제인구
         WHERE 성별 LIKE '%합계%' AND 분기별 LIKE '%전체%'
         LIMIT 1
         """
         df_ep = run_query(query_ep)
         
         if not df_ep.empty:
-            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
+            # 컬럼명 유연하게 매칭 (가사육아 혹은 가사_육아 둘 다 대응)
             row = df_ep.iloc[0]
-            values = [row['취업자'], row['실업자'], row['비경제활동_가사육아'], row['비경제활동_통학'], row['비경제활동_기타']]
+            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
+            
+            # 가사육아 컬럼명 자동 매칭 구조
+            household_col = [c for c in df_ep.columns if '가사' in c][0]
+            
+            values = [
+                row['취업자'], 
+                row['실업자'], 
+                row[household_col], 
+                row['비경제활동_통학'], 
+                row['비경제활동_기타']
+            ]
             
             fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
-            st.warning("경제인구 데이터에서 조건을 만족하는 데이터를 찾을 수 없습니다.")
+            st.warning("경제인구 데이터에서 '합계' 및 '전체' 조건을 만족하는 행을 찾지 못했습니다.")
             
     except Exception as e:
         st.error(f"차트 1-2 로드 실패: {e}")
@@ -121,35 +128,38 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # 실제 테이블명 'grdp_data' 반영 및 강원 지역 데이터 한정 추출
+    # [오류 해결] REALSCORE 에러 해결을 위해 쿼리에서는 그냥 뽑아온 뒤 파이썬(Pandas)에서 정형화
     query_grdp = """
-    SELECT 
-        시도별, 
-        경제활동별, 
-        CAST(실질 AS REALSCORE) as 실질값
+    SELECT 시도별, 경제활동별, 실질
     FROM grdp_data
     WHERE 시도별 LIKE '%강원%'
-      AND 경제활동별 NOT IN ('지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체')
-    ORDER BY 실질값 ASC
     """
     df_grdp = run_query(query_grdp)
     
     if not df_grdp.empty:
+        # 공백 제거 및 정제
+        df_grdp['경제활동별'] = df_grdp['경제활동별'].str.strip()
+        df_grdp['실질'] = pd.to_numeric(df_grdp['실질'], errors='coerce').fillna(0)
+        
+        # 제외항목 필터링
+        exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체', '총합']
+        df_grdp_filtered = df_grdp[~df_grdp['경제활동별'].isin(exclude_cats)].sort_values('실질', ascending=True)
+        
         colors = []
-        for cat in df_grdp['경제활동별']:
+        for cat in df_grdp_filtered['경제활동별']:
             if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
                 colors.append('#008080') # 하이라이트 청록색
             else:
                 colors.append('#D3D3D3') # 기본 회색
                 
         fig2 = go.Figure(go.Bar(
-            x=df_grdp['실질값'],
-            y=df_grdp['경제활동별'],
+            x=df_grdp_filtered['실질'],
+            y=df_grdp_filtered['경제활동별'],
             orientation='h',
             marker_color=colors
         ))
         
-        # Mime type 에러를 방지하기 위해 불필요한 레이아웃 속성을 표준 구조로 고정
+        # Mime type 및 축 여백 자동 확보 설정 완료
         fig2.update_layout(
             xaxis_title="실질 GRDP (백만 원)",
             yaxis=dict(
@@ -161,7 +171,7 @@ try:
         )
         st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.warning("grdp_data 테이블에서 '강원' 조건을 만족하는 데이터를 찾지 못했습니다.")
+        st.warning("grdp_data 테이블에서 데이터를 불러오지 못했습니다.")
         
 except Exception as e:
     st.error(f"차트 2 로드 실패: {e}")
@@ -173,10 +183,10 @@ st.info("""
 """)
 
 # --------------------------------------------------------------------------------------------------
-# 하단 안내 영역 (Mime type 버그 방지를 위해 단순 텍스트로 수정)
+# 하단 배포 영역 (Mime type 오류 방지를 위해 안전한 컴포넌트로 유지)
 # --------------------------------------------------------------------------------------------------
 st.write("---")
 st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 방법")
-st.text("1. GitHub 저장소에 app.py, requirements.txt, 강원도분석.db 3개 파일을 업로드합니다.")
+st.text("1. GitHub 저장소에 app.py, requirements.txt, 강원도분석.db 파일을 업로드합니다.")
 st.text("2. share.streamlit.io (Streamlit Cloud)에 접속하여 로그인합니다.")
-st.text("3. [New app] 버튼을 누르고 본인의 Repository와 app.py를 선택한 뒤 Deploy를 클릭하면 완료됩니다.")
+st.text("3. [New app] 버튼을 누르고 레포지토리와 app.py를 지정한 후 Deploy를 클릭하면 실시간 배포됩니다.")
