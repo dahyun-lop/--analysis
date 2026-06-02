@@ -80,26 +80,22 @@ with col2:
     st.subheader("1-2. 강원도 인구 구성 현황 (2023)")
     
     try:
-        # [수정 완료] 조건 검색 방식을 철회하고 테이블 최상단의 '합계/전체' 행을 안전하게 로드
         query_ep = "SELECT * FROM 경제인구"
         df_ep = run_query(query_ep)
         
         if not df_ep.empty:
             df_ep.columns = df_ep.columns.str.strip()
             
-            # 조건부 필터링 (가장 확실한 첫 번째 조건 매칭)
+            # 조건부 필터링
             df_target = df_ep[(df_ep['성별'].str.contains('합계|계')) & (df_ep['분기별'].str.contains('전체|계|연평균'))]
             
-            # 만약 필터링 결과가 비어있다면 그냥 첫 행 데이터 사용 (안전장치)
             if df_target.empty:
                 row = df_ep.iloc[0]
             else:
                 row = df_target.iloc[0]
             
-            # 가사육아 컬럼명 동적 탐색 (오타 및 언더바 방어)
             household_col = [c for c in df_ep.columns if '가사' in c][0]
             
-            # 원본 데이터가 문자열일 수 있으므로 깨끗하게 숫자 데이터로 강제 변환
             v_employ = int(pd.to_numeric(row['취업자'], errors='coerce'))
             v_unemploy = int(pd.to_numeric(row['실업자'], errors='coerce'))
             v_house = int(pd.to_numeric(row[household_col], errors='coerce'))
@@ -109,7 +105,13 @@ with col2:
             labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
             values = [v_employ, v_unemploy, v_house, v_school, v_etc]
             
-            fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
+            # [수정] Plotly 색상 모듈 호출 오류 수정
+            fig1_2 = go.Figure(data=[go.Pie(
+                labels=labels, 
+                values=values, 
+                hole=.4, 
+                marker=dict(colors=px.colors.qualitative.Pastel1)
+            )])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
@@ -132,7 +134,8 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    query_grdp = "SELECT * FROM grdp_data"
+    # [수정] 빈 테이블인 grdp_data 대신 실제 데이터가 들어있는 GRDP 테이블 쿼리
+    query_grdp = 'SELECT * FROM "GRDP"'
     df_grdp = run_query(query_grdp)
     
     if not df_grdp.empty:
@@ -191,7 +194,7 @@ try:
         else:
             st.warning("필터링된 세부 업종별 GRDP 데이터가 존재하지 않습니다.")
     else:
-        st.warning("grdp_data 테이블이 비어있거나 데이터를 가져오지 못했습니다.")
+        st.warning("GRDP 테이블이 비어있거나 데이터를 가져오지 못했습니다.")
         
 except Exception as e:
     st.error(f"차트 2 로드 실패: {e}")
