@@ -33,7 +33,6 @@ with col1:
     st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
     try:
-        # [수정] 데이터 타입을 REAL로 안전하게 캐스팅
         query_aging = """
         SELECT 
             시점, 
@@ -81,7 +80,6 @@ with col2:
     st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
     try:
-        # LIKE 조건을 활용해 공백이나 세부 표기 차이 방어
         query_ep = """
         SELECT * FROM 경제인구
         WHERE 성별 LIKE '%합계%' AND 분기별 LIKE '%전체%'
@@ -90,11 +88,10 @@ with col2:
         df_ep = run_query(query_ep)
         
         if not df_ep.empty:
-            # 컬럼명 유연하게 매칭 (가사육아 혹은 가사_육아 둘 다 대응)
             row = df_ep.iloc[0]
             labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
             
-            # 가사육아 컬럼명 자동 매칭 구조
+            # 가사육아 컬럼명 자동 매칭 구조 (언더바 에러 방지)
             household_col = [c for c in df_ep.columns if '가사' in c][0]
             
             values = [
@@ -128,22 +125,39 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # [오류 해결] REALSCORE 에러 해결을 위해 쿼리에서는 그냥 뽑아온 뒤 파이썬(Pandas)에서 정형화
+    # [수정 핵심] 컬럼명 오류를 원천 차단하기 위해 전체 컬럼(*)을 조회해옴
     query_grdp = """
-    SELECT 시도별, 경제활동별, 실질
-    FROM grdp_data
+    SELECT * FROM grdp_data
     WHERE 시도별 LIKE '%강원%'
     """
     df_grdp = run_query(query_grdp)
     
     if not df_grdp.empty:
-        # 공백 제거 및 정제
+        # 데이터 정제 및 양끝 공백 제거
         df_grdp['경제활동별'] = df_grdp['경제활동별'].str.strip()
-        df_grdp['실질'] = pd.to_numeric(df_grdp['실질'], errors='coerce').fillna(0)
         
-        # 제외항목 필터링
-        exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체', '총합']
-        df_grdp_filtered = df_grdp[~df_grdp['경제활동별'].isin(exclude_cats)].sort_values('실질', ascending=True)
+        # [지능형 컬럼 탐색] '실질', '당해', '가격', '값' 등이 포함되거나 숫자형태인 컬럼을 찾아 '금액'으로 통일
+        value_col = None
+        for col in df_grdp.columns:
+            if col in ['실질', '당해년도_가격', '당해년도가격', '값']:
+                value_col = col
+                break
+        
+        # 만약 지정된 이름이 없으면 텍스트가 아닌 마지막 컬럼을 값 컬럼으로 추정
+        if not value_col:
+            numeric_cols = [c for c in df_grdp.columns if c not in ['시도별', '경제활동별', '시점', '년도']]
+            if numeric_cols:
+                value_col = numeric_cols[0]
+                
+        if value_col:
+            df_grdp['금액'] = pd.to_numeric(df_grdp[value_col], errors='coerce').fillna(0)
+        else:
+            # 최후의 보루: 데이터셋의 3번째 컬럼을 사용
+            df_grdp['금액'] = pd.to_numeric(df_grdp.iloc[:, 2], errors='coerce').fillna(0)
+        
+        # 불필요한 총합 항목 필터링 제거
+        exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체', '총합', '계']
+        df_grdp_filtered = df_grdp[~df_grdp['경제활동별'].isin(exclude_cats)].sort_values('금액', ascending=True)
         
         colors = []
         for cat in df_grdp_filtered['경제활동별']:
@@ -153,15 +167,14 @@ try:
                 colors.append('#D3D3D3') # 기본 회색
                 
         fig2 = go.Figure(go.Bar(
-            x=df_grdp_filtered['실질'],
+            x=df_grdp_filtered['금액'],
             y=df_grdp_filtered['경제활동별'],
             orientation='h',
             marker_color=colors
         ))
         
-        # Mime type 및 축 여백 자동 확보 설정 완료
         fig2.update_layout(
-            xaxis_title="실질 GRDP (백만 원)",
+            xaxis_title="GRDP 금액 (백만 원)",
             yaxis=dict(
                 tickfont=dict(size=11),
                 automargin=True
@@ -171,7 +184,7 @@ try:
         )
         st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.warning("grdp_data 테이블에서 데이터를 불러오지 못했습니다.")
+        st.warning("grdp_data 테이블에서 강원도 데이터를 찾지 못했습니다.")
         
 except Exception as e:
     st.error(f"차트 2 로드 실패: {e}")
@@ -181,12 +194,3 @@ st.info("""
 * 강원도의 산업별 실질 총생산 구조를 살펴보면, 제조업 기반이 취약한 대신 **'숙박 및 음식점업' 및 '문화/기타 서비스업' 등 관광 관련 산업(청록색 표시)**이 매우 상위권에 위치해 있습니다.
 * 이는 급격한 고령화로 전통적 생산 인구가 감소하더라도, 지역의 특수성을 살린 관광 마케팅 및 서비스 산업 활성화를 통해 경제의 총부가가치를 유의미하게 방어하고 보완할 수 있음을 입증합니다.
 """)
-
-# --------------------------------------------------------------------------------------------------
-# 하단 배포 영역 (Mime type 오류 방지를 위해 안전한 컴포넌트로 유지)
-# --------------------------------------------------------------------------------------------------
-st.write("---")
-st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 방법")
-st.text("1. GitHub 저장소에 app.py, requirements.txt, 강원도분석.db 파일을 업로드합니다.")
-st.text("2. share.streamlit.io (Streamlit Cloud)에 접속하여 로그인합니다.")
-st.text("3. [New app] 버튼을 누르고 레포지토리와 app.py를 지정한 후 Deploy를 클릭하면 실시간 배포됩니다.")
