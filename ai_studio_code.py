@@ -1,115 +1,201 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 import os
 
-# 1. 페이지 기본 설정
-st.set_page_config(page_title="강원도 고령화 & 산업 분석", layout="wide")
+# 1. 페이지 설정 및 제목
+st.set_page_config(page_title="강원도 고령화 & 경제 분석 대시보드", layout="wide")
+st.title("🌲 강원도 지역 경제 및 고령화 현황 분석")
+st.markdown("본 대시보드는 강원도의 인구 구조 변화와 주요 경제 지표를 시각화하여 가설을 검증합니다.")
 
-# 2. 데이터베이스 연결 확인
-db_path = "강원도분석.db"
+# CSV 파일 경로 설정
+url_aging = "aging_population.csv"
+url_economic = "economic_population.csv"
+url_grdp = "grdp_data.csv"
 
-if not os.path.exists(db_path):
-    st.error("⚠️ 데이터베이스 파일(강원도분석.db)을 찾을 수 없습니다. 파일 위치를 확인해주세요.")
+# 파일 존재 여부 체크
+missing_files = []
+for f in [url_aging, url_economic, url_grdp]:
+    if not os.path.exists(f):
+        missing_files.append(f)
+
+if missing_files:
+    st.error(f"⚠️ 아래의 CSV 파일을 찾을 수 없습니다. 파일 위치를 확인해주세요.")
+    for mf in missing_files:
+        st.markdown(f"- `{mf}`")
     st.stop()
 
-# 데이터 로드 함수
-def run_query(query):
-    with sqlite3.connect(db_path) as conn:
-        return pd.read_sql(query, conn)
-
-# 헤더 영역
-st.title("🌲 강원도 공공데이터 분석 대시보드")
-st.markdown("강원도의 고령화 현황과 2023년 경제 구조를 분석하여 지역 경제의 미래를 진단합니다.")
-st.divider()
-
-# --- 차트 1: 고령화 추이 및 경제활동 인구 구조 ---
-st.header("1. 고령화 추이 및 경제활동 인구 구조")
+# --------------------------------------------------------------------------------------------------
+# 차트 1: 고령화 추이 및 경제활동 인구 구조 (가설 1 검증)
+# --------------------------------------------------------------------------------------------------
+st.header("1. 강원도 고령화 추이 및 경제활동 인구 구조")
+st.caption("가설: 고령화율이 높을수록 지역 생산성 및 경제 지표가 둔화될 것이다.")
 
 col1, col2 = st.columns(2)
 
-# 1-1. 고령화 추이 (좌측)
 with col1:
-    st.subheader("10년간 고령화율 변화 (2014~2023)")
-    sql_aging = """
-    SELECT 
-        시점, 
-        (CAST(고령자_65세이상 AS FLOAT) / 등록인구_소계 * 100) AS 고령화율
-    FROM aging_population
-    ORDER BY 시점 ASC
-    """
-    df_aging = run_query(sql_aging)
+    st.subheader("1-1. 10년간 고령화율 추이 (2014~2023)")
     
-    fig_aging = px.line(df_aging, x='시점', y='고령화율', markers=True, 
-                        title="연도별 고령화율 추이 (%)",
-                        color_discrete_sequence=['#EF553B'])
-    st.plotly_chart(fig_aging, use_container_width=True)
-    
-    with st.expander("사용한 SQL 보기"):
-        st.code(sql_aging, language="sql")
+    try:
+        # 한글 깨짐(BOM) 방지를 위해 utf-8-sig 사용, 안되면 cp949 시도
+        try:
+            df_aging = pd.read_csv(url_aging, encoding='utf-8-sig')
+        except UnicodeDecodeError:
+            df_aging = pd.read_csv(url_aging, encoding='cp949')
+            
+        df_aging.columns = df_aging.columns.str.strip()
+        
+        # [안전 장치] 만약 '시점'이라는 컬럼명이 없으면 첫 번째 컬럼 이름을 '시점'으로 강제 변경
+        if '시점' not in df_aging.columns and len(df_aging.columns) > 0:
+            df_aging.rename(columns={df_aging.columns[0]: '시점'}, inplace=True)
+            
+        df_aging = df_aging.dropna(subset=['시점']).sort_values('시점')
+        
+        # 고령화율 계산 및 타입 변환
+        df_aging['고령자_65세이상'] = pd.to_numeric(df_aging['고령자_65세이상'], errors='coerce')
+        df_aging['등록인구_소계'] = pd.to_numeric(df_aging['등록인구_소계'], errors='coerce')
+        df_aging['고령화율'] = (df_aging['고령자_65세이상'] / df_aging['등록인구_소계']) * 100
 
-# 1-2. 경제활동 인구 구조 (우측)
+        fig1_1 = go.Figure()
+        fig1_1.add_trace(go.Bar(
+            x=df_aging['시점'], 
+            y=df_aging['고령자_65세이상'], 
+            name='고령자 수 (명)', 
+            yaxis='y1', 
+            marker_color='#FFA07A'
+        ))
+        fig1_1.add_trace(go.Scatter(
+            x=df_aging['시점'], 
+            y=df_aging['고령화율'], 
+            name='고령화율 (%)', 
+            yaxis='y2', 
+            mode='lines+markers', 
+            line=dict(color='#FF4500', width=3)
+        ))
+        
+        fig1_1.update_layout(
+            yaxis=dict(title='고령자 수 (명)', showgrid=False),
+            yaxis2=dict(title='고령화율 (%)', overlaying='y', side='right', showgrid=True),
+            legend=dict(x=0.01, y=0.99),
+            margin=dict(l=40, r=40, t=20, b=40)
+        )
+        st.plotly_chart(fig1_1, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"차트 1-1 로드 실패: {e}")
+
 with col2:
-    st.subheader("2023년 경제활동 인구 구성")
-    sql_eco = """
-    SELECT 
-        취업자, 실업자, 비경제활동_가사육아, 비경제활동_통학, 비경제활동_기타
-    FROM economic_population
-    WHERE 성별 = '합계' AND 분기별 = '전체'
-    """
-    df_eco = run_query(sql_eco)
+    st.subheader("1-2. 2023년 강원도 인구 구성 현황")
     
-    # 파이 차트를 위해 데이터 재구성 (Tidy format)
-    df_eco_melted = df_eco.melt(var_name="구분", value_name="인원수")
-    
-    fig_eco = px.pie(df_eco_melted, values='인원수', names='구분', hole=0.4,
-                     title="강원도 인구 구조 비중",
-                     color_discrete_sequence=px.colors.qualitative.Pastel)
-    st.plotly_chart(fig_eco, use_container_width=True)
-    
-    with st.expander("사용한 SQL 보기"):
-        st.code(sql_eco, language="sql")
-
-# 차트 1 인사이트 요약
-st.info("""
-**가설 1 검증 및 인사이트:**
-- **현황:** 강원도의 고령화율은 10년간 지속적으로 상승하여 초고령 사회의 기준을 크게 상회하고 있습니다.
-- **인구 구조:** 우측 차트에서 '비경제활동' 인구 중 가사, 통학 외 '기타' 비중이 높게 나타난다면, 이는 고령으로 인한 은퇴 인구가 상당수 포함되어 있음을 시사합니다. 생산 가능 인구의 감소가 실제 경제 지표 둔화로 이어질 우려가 큽니다.
-""")
-st.divider()
-
-# --- 차트 2: 주요 산업 구조와 관광 산업 비중 ---
-st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중 (2023)")
-
-sql_grdp = """
-SELECT 경제활동별, 실질
-FROM grdp_data
-WHERE 시도별 != '전국' AND 경제활동별 != '전체'
-ORDER BY 실질 DESC
-"""
-df_grdp = run_query(sql_grdp)
-
-# 관광 관련 산업 하이라이트 설정
-target_industries = ['숙박 및 음식점업', '문화 및 기타 서비스업']
-df_grdp['색상'] = df_grdp['경제활동별'].apply(lambda x: '#636EFA' if x in target_industries else '#AB63FA')
-
-fig_grdp = px.bar(df_grdp, x='실질', y='경제활동별', orientation='h',
-                  title="강원도 산업별 실질 GRDP 규모",
-                  labels={'실질': '생산액 (실질 GRDP)', '경제활동별': '산업군'},
-                  color='색상', color_discrete_map="identity")
-
-fig_grdp.update_layout(yaxis={'categoryorder':'total ascending'}) # 높은 순서대로 정렬
-st.plotly_chart(fig_grdp, use_container_width=True)
-
-with st.expander("사용한 SQL 보기"):
-    st.code(sql_grdp, language="sql")
+    try:
+        try:
+            df_economic = pd.read_csv(url_economic, encoding='utf-8-sig')
+        except UnicodeDecodeError:
+            df_economic = pd.read_csv(url_economic, encoding='cp949')
+            
+        df_economic.columns = df_economic.columns.str.strip()
+        
+        # 성별, 분기별 문자열 공백 제거 후 필터링 (에러 방지)
+        df_economic['성별'] = df_economic['성별'].astype(str).str.strip()
+        df_economic['분기별'] = df_economic['분기별'].astype(str).str.strip()
+        
+        df_filtered = df_economic[(df_economic['성별'] == '합계') & (df_economic['분기별'] == '전체')]
+        
+        if not df_filtered.empty:
+            labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
+            row = df_filtered.iloc[0]
+            
+            # 수치 데이터 형변환
+            values = [
+                pd.to_numeric(row['취업자'], errors='coerce'),
+                pd.to_numeric(row['실업자'], errors='coerce'),
+                pd.to_numeric(row['비경제활동_가사육아'], errors='coerce'),
+                pd.to_numeric(row['비경제활동_통학'], errors='coerce'),
+                pd.to_numeric(row['비경제활동_기타'], errors='coerce')
+            ]
+            
+            fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
+            fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
+            st.plotly_chart(fig1_2, use_container_width=True)
+        else:
+            st.warning("경제인구 데이터에서 '성별=합계' 및 '분기별=전체' 조건에 맞는 데이터를 찾을 수 없습니다.")
+            
+    except Exception as e:
+        st.error(f"차트 1-2 로드 실패: {e}")
 
 st.info("""
-**가설 2 검증 및 인사이트:**
-- **산업 구조:** 강원도 내에서 '숙박 및 음식점업'과 '문화 서비스업'은 주요한 생산 축을 담당하고 있습니다. (하이라이트된 막대 확인)
-- **보완 가능성:** 제조업 기반이 취약한 고령화 지역에서 관광/서비스 산업은 고령층의 고용 유지와 외부 자본 유입을 돕는 핵심 보완책입니다. 다만, 해당 산업군이 상위권에 위치하더라도 전체 경제 규모 대비 비중을 지속적으로 확대할 필요가 있습니다.
+**💡 인사이트 (가설 1 검증)**
+* 강원도의 고령화율은 지난 10년간 가파르게 상승하여 이미 초고령사회 기준(20%)을 크게 상회하고 있습니다.
+* 경제활동 인구 구조 분석 결과, 생산에 직접 기여하지 못하는 비경제활동 인구 비중이 높아 지역 생산성 전반에 부담으로 작용하고 있음을 시사합니다.
 """)
 
-st.caption("Data Source: 강원도 통계 데이터베이스 (2014-2023)")
+# --------------------------------------------------------------------------------------------------
+# 차트 2: 주요 산업 구조와 관광 산업의 비중 (가설 2 검증)
+# --------------------------------------------------------------------------------------------------
+st.write("---")
+st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
+st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
+
+try:
+    try:
+        df_grdp = pd.read_csv(url_grdp, encoding='utf-8-sig')
+    except UnicodeDecodeError:
+        df_grdp = pd.read_csv(url_grdp, encoding='cp949')
+        
+    df_grdp.columns = df_grdp.columns.str.strip()
+    
+    df_grdp['시도별'] = df_grdp['시도별'].astype(str).str.strip()
+    df_grdp['경제활동별'] = df_grdp['경제활동별'].astype(str).str.strip()
+    df_grdp['실질'] = pd.to_numeric(df_grdp['실질'], errors='coerce')
+    
+    exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치']
+    df_grdp_filtered = df_grdp[
+        (df_grdp['시도별'].str.contains('강원')) & 
+        (~df_grdp['경제활동별'].isin(exclude_cats))
+    ].sort_values('실질', ascending=True)
+    
+    colors = []
+    for cat in df_grdp_filtered['경제활동별']:
+        if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
+            colors.append('#008080') 
+        else:
+            colors.append('#D3D3D3') 
+            
+    fig2 = go.Figure(go.Bar(
+        x=df_grdp_filtered['실질'],
+        y=df_grdp_filtered['경제활동별'],
+        orientation='h',
+        marker_color=colors
+    ))
+    
+    fig2.update_layout(
+        xaxis_title="실질 GRDP (백만 원)",
+        yaxis=dict(
+            tickfont=dict(size=11),
+            automargin=True
+        ),
+        margin=dict(l=50, r=40, t=20, b=40),
+        height=600
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+        
+except Exception as e:
+    st.error(f"차트 2 로드 실패: {e}")
+
+st.info("""
+**💡 인사이트 (가설 2 검증)**
+* 강원도의 산업별 실질 총생산 구조를 살펴보면, 제조업 기반이 취약한 대신 **'숙박 및 음식점업' 및 '문화/기타 서비스업' 등 관광 관련 산업(청록색 표시)**이 매우 상위권에 위치해 있습니다.
+* 이는 급격한 고령화로 전통적 생산 인구가 감소하더라도, 지역의 특수성을 살린 관광 마케팅 및 서비스 산업 활성화를 통해 경제의 총부가가치를 유의미하게 방어하고 보완할 수 있음을 입증합니다.
+""")
+
+# --------------------------------------------------------------------------------------------------
+# 배포 가이드 안내
+# --------------------------------------------------------------------------------------------------
+st.write("---")
+st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 안내")
+st.markdown("""
+1. **GitHub 업로드:** 새 저장소(Repository)를 만들고 코드가 담긴 파일, `requirements.txt`, 그리고 3개의 CSV 파일(`aging_population.csv`, `economic_population.csv`, `grdp_data.csv`)을 함께 푸시합니다.
+2. **Cloud 로그인:** [Streamlit Community Cloud](https://share.streamlit.io/)에 접속하여 GitHub 계정으로 로그인합니다.
+3. **App 배포:** **[New app]** 버튼을 누른 후, 레포지토리와 실행 메인 파일 경로를 선택하고 **[Deploy]**를 누르면 배포됩니다.
+""")
