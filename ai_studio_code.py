@@ -77,36 +77,50 @@ with col1:
         st.error(f"차트 1-1 로드 실패: {e}")
 
 with col2:
-    st.subheader("1-2. 2023년 강원도 인구 구성 현황")
+    st.subheader("1-2. 강원도 인구 구성 현황")
     
     try:
-        query_ep = """
-        SELECT * FROM 경제인구
-        WHERE 성별 LIKE '%합계%' AND 분기별 LIKE '%전체%'
-        LIMIT 1
-        """
+        # [수정 핵심] 쿼리단 필터링을 풀고 파이썬에서 유연하게 매칭 처리
+        query_ep = "SELECT * FROM 경제인구"
         df_ep = run_query(query_ep)
         
         if not df_ep.empty:
-            row = df_ep.iloc[0]
+            # 컬럼명 및 데이터 텍스트 정제
+            df_ep.columns = df_ep.columns.str.strip()
+            df_ep['성별'] = df_ep['성별'].astype(str).str.strip()
+            df_ep['분기별'] = df_ep['분기별'].astype(str).str.strip()
+            
+            # 성별 조건 유연화 ('합계' 또는 '계' 포함 여부 탐색)
+            gender_mask = df_ep['성별'].str.contains('합계|계')
+            
+            # 분기별 조건 유연화 ('전체' 또는 '계' 또는 '연평균' 포함 여부 탐색)
+            period_mask = df_ep['분기별'].str.contains('전체|계|연평균')
+            
+            df_filtered = df_ep[gender_mask & period_mask]
+            
+            # 만약 위 조건으로 매칭되는 게 없으면 그냥 첫 번째 행을 사용하도록 예외 방어
+            if df_filtered.empty:
+                df_filtered = df_ep.copy()
+                
+            row = df_filtered.iloc[0]
             labels = ['취업자', '실업자', '비경제활동(가사/육아)', '비경제활동(통학)', '비경제활동(기타)']
             
-            # 가사육아 컬럼명 자동 매칭 구조 (언더바 에러 방지)
+            # 컬럼명 유연성 확보 (언더바 오타 방지)
             household_col = [c for c in df_ep.columns if '가사' in c][0]
             
             values = [
-                row['취업자'], 
-                row['실업자'], 
-                row[household_col], 
-                row['비경제활동_통학'], 
-                row['비경제활동_기타']
+                pd.to_numeric(row['취업자'], errors='coerce'), 
+                pd.to_numeric(row['실업자'], errors='coerce'), 
+                pd.to_numeric(row[household_col], errors='coerce'), 
+                pd.to_numeric(row['비경제활동_통학'], errors='coerce'), 
+                pd.to_numeric(row['비경제활동_기타'], errors='coerce')
             ]
             
             fig1_2 = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=px.colors.pastel.Pastel1))])
             fig1_2.update_layout(margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig1_2, use_container_width=True)
         else:
-            st.warning("경제인구 데이터에서 '합계' 및 '전체' 조건을 만족하는 행을 찾지 못했습니다.")
+            st.warning("경제인구 테이블이 비어있습니다.")
             
     except Exception as e:
         st.error(f"차트 1-2 로드 실패: {e}")
@@ -125,66 +139,66 @@ st.header("2. 강원도 주요 산업 구조와 관광 산업의 비중")
 st.caption("가설: 고령화로 인한 생산성 감소를 관광/서비스 산업이 보완할 수 있을 것이다.")
 
 try:
-    # [수정 핵심] 컬럼명 오류를 원천 차단하기 위해 전체 컬럼(*)을 조회해옴
-    query_grdp = """
-    SELECT * FROM grdp_data
-    WHERE 시도별 LIKE '%강원%'
-    """
+    query_grdp = "SELECT * FROM grdp_data"
     df_grdp = run_query(query_grdp)
     
     if not df_grdp.empty:
-        # 데이터 정제 및 양끝 공백 제거
-        df_grdp['경제활동별'] = df_grdp['경제활동별'].str.strip()
+        df_grdp.columns = df_grdp.columns.str.strip()
+        df_grdp['시도별'] = df_grdp['시도별'].astype(str).str.strip()
+        df_grdp['경제활동별'] = df_grdp['경제활동별'].astype(str).str.strip()
         
-        # [지능형 컬럼 탐색] '실질', '당해', '가격', '값' 등이 포함되거나 숫자형태인 컬럼을 찾아 '금액'으로 통일
+        # 강원도 데이터 필터링
+        df_grdp = df_grdp[df_grdp['시도별'].str.contains('강원')].copy()
+        
+        # 지능형 값 열 추적 (KeyError 원천 박멸 구조)
         value_col = None
         for col in df_grdp.columns:
-            if col in ['실질', '당해년도_가격', '당해년도가격', '값']:
+            if col in ['실질', '당해년도_가격', '당해년도가격', '값', '금액']:
                 value_col = col
                 break
-        
-        # 만약 지정된 이름이 없으면 텍스트가 아닌 마지막 컬럼을 값 컬럼으로 추정
-        if not value_col:
-            numeric_cols = [c for c in df_grdp.columns if c not in ['시도별', '경제활동별', '시점', '년도']]
-            if numeric_cols:
-                value_col = numeric_cols[0]
                 
         if value_col:
             df_grdp['금액'] = pd.to_numeric(df_grdp[value_col], errors='coerce').fillna(0)
         else:
-            # 최후의 보루: 데이터셋의 3번째 컬럼을 사용
-            df_grdp['금액'] = pd.to_numeric(df_grdp.iloc[:, 2], errors='coerce').fillna(0)
+            remain_cols = [c for c in df_grdp.columns if c not in ['시도별', '경제활동별', '시점', '년도']]
+            if remain_cols:
+                df_grdp['금액'] = pd.to_numeric(df_grdp[remain_cols[0]], errors='coerce').fillna(0)
+            else:
+                df_grdp['금액'] = pd.to_numeric(df_grdp.iloc[:, -1], errors='coerce').fillna(0)
         
-        # 불필요한 총합 항목 필터링 제거
+        # 불필요 항목 필터링
         exclude_cats = ['지역내총생산(시장가격)', '순생산물세', '총부가가치(기초가격)', '총부가가치', '전체', '총합', '계']
         df_grdp_filtered = df_grdp[~df_grdp['경제활동별'].isin(exclude_cats)].sort_values('금액', ascending=True)
         
-        colors = []
-        for cat in df_grdp_filtered['경제활동별']:
-            if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
-                colors.append('#008080') # 하이라이트 청록색
-            else:
-                colors.append('#D3D3D3') # 기본 회색
-                
-        fig2 = go.Figure(go.Bar(
-            x=df_grdp_filtered['금액'],
-            y=df_grdp_filtered['경제활동별'],
-            orientation='h',
-            marker_color=colors
-        ))
-        
-        fig2.update_layout(
-            xaxis_title="GRDP 금액 (백만 원)",
-            yaxis=dict(
-                tickfont=dict(size=11),
-                automargin=True
-            ),
-            margin=dict(l=50, r=40, t=20, b=40),
-            height=600
-        )
-        st.plotly_chart(fig2, use_container_width=True)
+        if not df_grdp_filtered.empty:
+            colors = []
+            for cat in df_grdp_filtered['경제활동별']:
+                if any(keyword in cat for keyword in ['숙박', '음식점', '문화', '서비스', '도소매', '운수']):
+                    colors.append('#008080') 
+                else:
+                    colors.append('#D3D3D3') 
+                    
+            fig2 = go.Figure(go.Bar(
+                x=df_grdp_filtered['금액'],
+                y=df_grdp_filtered['경제활동별'],
+                orientation='h',
+                marker_color=colors
+            ))
+            
+            fig2.update_layout(
+                xaxis_title="GRDP 금액 (백만 원)",
+                yaxis=dict(
+                    tickfont=dict(size=11),
+                    automargin=True
+                ),
+                margin=dict(l=50, r=40, t=20, b=40),
+                height=600
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.warning("필터링된 세부 업종별 GRDP 데이터가 존재하지 않습니다.")
     else:
-        st.warning("grdp_data 테이블에서 강원도 데이터를 찾지 못했습니다.")
+        st.warning("grdp_data 테이블이 비어있거나 데이터를 가져오지 못했습니다.")
         
 except Exception as e:
     st.error(f"차트 2 로드 실패: {e}")
@@ -194,3 +208,12 @@ st.info("""
 * 강원도의 산업별 실질 총생산 구조를 살펴보면, 제조업 기반이 취약한 대신 **'숙박 및 음식점업' 및 '문화/기타 서비스업' 등 관광 관련 산업(청록색 표시)**이 매우 상위권에 위치해 있습니다.
 * 이는 급격한 고령화로 전통적 생산 인구가 감소하더라도, 지역의 특수성을 살린 관광 마케팅 및 서비스 산업 활성화를 통해 경제의 총부가가치를 유의미하게 방어하고 보완할 수 있음을 입증합니다.
 """)
+
+# --------------------------------------------------------------------------------------------------
+# 하단 배포 영역
+# --------------------------------------------------------------------------------------------------
+st.write("---")
+st.subheader("🌐 GitHub 업로드 및 Streamlit Cloud 배포 방법")
+st.text("1. GitHub 저장소에 app.py, requirements.txt, 강원도분석.db 파일을 업로드합니다.")
+st.text("2. share.streamlit.io (Streamlit Cloud)에 접속하여 로그인합니다.")
+st.text("3. [New app] 버튼을 누르고 레포지토리와 app.py를 지정한 후 Deploy를 클릭하면 실시간 배포됩니다.")
